@@ -193,6 +193,8 @@ def main(port: int = 8000) -> None:
         srv.serve_forever()
     except KeyboardInterrupt:
         print("\n已停止")
+    finally:
+        srv.server_close()
 
 
 if __name__ == "__main__":

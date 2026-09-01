@@ -67,6 +67,7 @@ class TestRealLLMResilience(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.srv.shutdown()
+        cls.srv.server_close()
 
     def setUp(self):
         STATE["hits"] = 0
@@ -171,6 +172,7 @@ class TestFreeTierGuards(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.srv.shutdown()
+        cls.srv.server_close()
 
     def setUp(self):
         STATE["hits"] = 0

@@ -211,6 +211,10 @@ class RealLLM:
                     body = exc.read().decode("utf-8", "ignore")[:300]
                 except Exception:                              # noqa: BLE001
                     pass
+                finally:
+                    # HTTPError 既是异常也是可读取的响应对象。读取完错误正文后
+                    # 必须主动关闭，否则限流或鉴权失败时会遗留 socket 句柄。
+                    exc.close()
                 # JSON 模式不被支持：降级一次，之后整个会话都不再用
                 if exc.code == 400 and want_json and "response_format" in body:
                     self._json_mode_ok = False
