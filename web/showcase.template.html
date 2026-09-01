@@ -196,6 +196,12 @@ details[open] summary::before{content:"▾ "}
 .clm[data-c="arbitrated"]{border-left-color:var(--caution)}
 .clm .prov{font-family:var(--mono); font-size:10px; color:var(--faint); margin-top:3px; letter-spacing:.03em}
 .clm .prov a{color:var(--dispatch); text-decoration:none; border-bottom:1px dotted}
+.resource-body{margin:8px 0 0; padding:10px; white-space:pre-wrap; overflow-wrap:anywhere;
+  background:var(--bay); border:1px solid var(--etch); color:var(--readout);
+  font:12px/1.68 var(--sans)}
+.resource-quiz{margin:8px 0 0; padding-left:20px}
+.resource-quiz li{margin:8px 0; padding:8px 10px; background:var(--bay); border-left:2px solid var(--caution)}
+.resource-quiz .meta{display:block; margin-top:4px; font-family:var(--mono); font-size:10px; color:var(--faint)}
 
 /* ---------- 底部指标条 ---------- */
 .strip{border-top:1px solid var(--etch); background:var(--bay); padding:16px 18px 22px}
@@ -806,6 +812,18 @@ function bout(left, right, kind, label, why){
 }
 
 /* ---------- 资源与溯源 ---------- */
+function resourceBody(r){
+  if(r.kind === "quiz"){
+    const items = r.items || [];
+    if(!items.length) return `<p class="note">未生成可展示的测试题。</p>`;
+    return `<ol class="resource-quiz">${items.map((it, i) => `
+      <li>${esc(it.stem)}
+        <span class="meta">第 ${i+1} 题 · 判断题 · 难度 ${it.difficulty || r.difficulty}/5 · 依据 ${esc(it.source_id || "无引用")}</span>
+      </li>`).join("")}</ol>`;
+  }
+  return `<pre class="resource-body">${esc(r.body || "未生成可展示的资源正文。")}</pre>`;
+}
+
 function paintResources(){
   $("#resN").textContent = S.resources.length;
   const CN = {both:"双方印证", single:"单方提出", arbitrated:"仲裁采纳"};
@@ -817,13 +835,15 @@ function paintResources(){
           ? (r.variant === "remedial" ? "降维 · " : "进阶 · ") : ""}难度 ${r.difficulty}/5 · 断言 ${r.claims.length}</span>
       </div>
       <div class="ttl">${esc(r.title)}</div>
+      <details><summary>完整资源正文</summary>${resourceBody(r)}</details>
       <details><summary>断言与溯源链</summary>
         ${r.claims.map(c => {
           const kb = SNAP.kb[c.source_id] || {};
+          const verified = kb.verified ? "人工已核实" : "待人工核实";
           return `<div class="clm" data-c="${c.consensus || "single"}">
             <div>${esc(c.text)}</div>
             <div class="prov">${esc(c.source_id || "无引用")}　${esc(kb.source || "")}
-              　证据 ${c.evidence_score}　${esc(CN[c.consensus] || "")}</div>
+              　证据 ${c.evidence_score}　${esc(CN[c.consensus] || "")}　${verified}</div>
           </div>`;
         }).join("")}
       </details>
@@ -1226,7 +1246,6 @@ function nextQuestion(){
   const it = IV.next();
   if(!it){ finishQuiz(); return; }
   curItem = it;
-  const sn = IV.snapshot ? null : null;
   $("#quizProgress").textContent =
     `第 ${IV.asked.length + 1} / ${IV_DEPTH} 题 · 已覆盖 ${
       Object.values(IV.state).filter(x => x.n > 0).length} / ${SNAP.kps.length} 个知识点`;
@@ -1252,6 +1271,9 @@ function nextQuestion(){
 function answerQuestion(choice){
   const it = curItem;
   const step = IV.answer(it.id, choice);
+  // 这里只能读取完成状态，不能预取下一题。
+  // 预取会消费 pendingProbe，让刚触发的动态追问消失。
+  const finished = IV.done() || IV.asked.length >= IV.maxItems;
   document.querySelectorAll("#quizOpts .opt").forEach((b, i) => {
     b.disabled = true;
     if(i === it.answer) b.classList.add("right");
@@ -1270,7 +1292,7 @@ function answerQuestion(choice){
       </span>
     </div>
     <button class="cmd" id="quizNext" style="margin-top:12px; width:auto; padding:9px 20px">
-      ${IV.next() ? "下一题" : "完成测评，生成资源"}</button>`;
+      ${finished ? "完成测评，生成资源" : "下一题"}</button>`;
   $("#quizNext").onclick = nextQuestion;
 }
 
