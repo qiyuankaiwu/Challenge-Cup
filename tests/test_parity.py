@@ -37,7 +37,14 @@ def run_js(script: str) -> dict:
                                      encoding="utf-8") as fh:
         fh.write(harness)
         path = fh.name
-    out = subprocess.run([NODE, path], capture_output=True, text=True, timeout=60)
+    out = subprocess.run(
+        [NODE, path],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=60,
+    )
     if out.returncode != 0:
         raise AssertionError(f"node 执行失败：{out.stderr[:600]}")
     return json.loads(out.stdout)
