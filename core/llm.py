@@ -858,7 +858,7 @@ def build_llm() -> RealLLM | MockLLM:
     legacy_base_url = os.environ.get("AGENTEDU_BASE_URL", "").strip()
     minimax_base_url = os.environ.get(
         "AGENTEDU_MINIMAX_BASE_URL",
-        legacy_base_url or "https://api.minimax.io/v1",
+        legacy_base_url or "https://api.minimaxi.com/v1",
     ).strip()
     deepseek_base_url = os.environ.get(
         "AGENTEDU_DEEPSEEK_BASE_URL",

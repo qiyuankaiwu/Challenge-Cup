@@ -82,6 +82,24 @@ class TestProjectDotenv(unittest.TestCase):
             "deepseek-v4-pro": ("https://deepseek.example", "deepseek-test-key"),
         })
 
+    def test_build_llm_defaults_to_mainland_minimax_endpoint(self) -> None:
+        environment = {
+            "AGENTEDU_MINIMAX_API_KEY": "minimax-test-key",
+            "AGENTEDU_DEEPSEEK_API_KEY": "deepseek-test-key",
+        }
+        with patch.dict(os.environ, environment, clear=True), \
+                patch("core.llm._load_project_env"):
+            llm = build_llm()
+
+        self.assertEqual(
+            llm.adapters["MiniMax-M3"].base_url,
+            "https://api.minimaxi.com/v1",
+        )
+        self.assertEqual(
+            llm.adapters["deepseek-v4-pro"].base_url,
+            "https://api.deepseek.com",
+        )
+
     def test_build_llm_reuses_adapter_for_legacy_unified_gateway(self) -> None:
         environment = {
             "AGENTEDU_API_KEY": "gateway-test-key",

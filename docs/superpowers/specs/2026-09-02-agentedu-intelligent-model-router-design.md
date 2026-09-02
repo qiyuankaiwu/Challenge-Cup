@@ -90,7 +90,7 @@ SmartModelRouter
 
 ```dotenv
 AGENTEDU_MINIMAX_API_KEY=<MiniMax key>
-AGENTEDU_MINIMAX_BASE_URL=https://api.minimax.io/v1
+AGENTEDU_MINIMAX_BASE_URL=https://api.minimaxi.com/v1  # 国内站；国际站用 api.minimax.io
 AGENTEDU_MODEL=MiniMax-M3
 AGENTEDU_DEEPSEEK_API_KEY=<DeepSeek key>
 AGENTEDU_DEEPSEEK_BASE_URL=https://api.deepseek.com
