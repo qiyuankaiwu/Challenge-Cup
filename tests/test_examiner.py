@@ -23,6 +23,16 @@ from core.llm import MockLLM
 from core.retrieval import Retriever
 
 
+class _VerdictLLM:
+    """Deterministic stand-in for the external semantic verifier."""
+
+    def __init__(self, verdict: str):
+        self.verdict = verdict
+
+    def run(self, *args, **kwargs) -> str:
+        return json.dumps({"verdict": self.verdict, "reason": "test"})
+
+
 class TestNumericDetection(unittest.TestCase):
     def test_numeric_options(self):
         for t in ["0.5", "250", "1.4米", "8层", "三年", "一万小时", "二十五"]:
@@ -67,6 +77,61 @@ class TestVetting(unittest.TestCase):
                 stem="ABB 示例中手动模式应如何操作",
                 options=["只能通过示教器操作", "机器人可在手动或自动模式下运行",
                          "可以绕过现场规程", "无需示教器"], answer=0))
+        self.assertIn("可能同样成立", str(cm.exception))
+
+    def test_high_overlap_distractors_pass_when_auditor_rejects_them(self):
+        """词面相似不是成立；只有独立审核确认其不成立时才能放行。"""
+        examiner = ExaminerAgent(
+            _VerdictLLM("unsupported"),
+            self.ex.retriever,
+            self.kps,
+        )
+        item = {
+            "id": "T-counterfactual",
+            "kp": "KP-01",
+            "level": 3,
+            "stem": "关于机器人控制柜的组成与功能，下列说法正确的是：",
+            "options": [
+                "包含计算机、电力电子和电机驱动器，执行程序并向各关节电机发送控制命令",
+                "包含计算机、电力电子和减速器，执行程序并向各关节电机发送控制命令",
+                "包含计算机、气动阀和电机驱动器，执行程序并向各关节电机发送控制命令",
+                "包含液压泵、电力电子和电机驱动器，执行程序并向各关节电机发送控制命令",
+            ],
+            "answer": 0,
+            "source_id": "KB-002",
+            "origin": "generated",
+        }
+
+        try:
+            examiner.vet(item)
+        except ItemRejected as exc:
+            self.fail(f"独立审核已拒绝的干扰项仍被词面阈值误伤：{exc}")
+
+    def test_rule_only_drop_cannot_certify_a_supported_distractor(self):
+        """规则低覆盖误判不能充当语义证据，放过第二个正确答案。"""
+        examiner = ExaminerAgent(
+            _VerdictLLM("supported"),
+            self.ex.retriever,
+            self.kps,
+        )
+        item = {
+            "id": "T-second-correct",
+            "kp": "KP-13",
+            "level": 3,
+            "stem": "关于机器人工作站的安全防护，下列说法正确的是：",
+            "options": [
+                "安全门打开时应停止机器人及相关设备的自动运行",
+                "机器人安全防护包括安全围栏与安全门",
+                "完成作业后应按工艺要求核对程序与工具状态",
+                "设备维护前应按现场要求记录润滑与紧固状态",
+            ],
+            "answer": 0,
+            "source_id": "KB-022",
+            "origin": "generated",
+        }
+
+        with self.assertRaises(ItemRejected) as cm:
+            examiner.vet(item)
         self.assertIn("可能同样成立", str(cm.exception))
 
     def test_stem_with_invented_number_is_rejected(self):

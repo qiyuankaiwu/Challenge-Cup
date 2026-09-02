@@ -33,9 +33,11 @@ import json
 import re
 
 import config
+from agents.audit import AuditAgent
 from core.llm import parse_json
 from core.itemquality import structural
 from core.retrieval import Retriever, numbers_in, overlap_ratio
+from core.schema import Claim, VERDICT_CONTRADICTED, VERDICT_UNSUPPORTED
 
 _ANALYZE_SYS = (
     "你是职业技能培训的学情分析师。读学习者的自述，判断他的起点。"
@@ -139,12 +141,23 @@ class ExaminerAgent:
         self.llm = llm
         self.retriever = retriever
         self.kp_index = kp_index
+        self.auditor = AuditAgent(llm, retriever)
         self.generated: dict[str, dict] = {}
         self.rejects: list[dict] = []
         self.no_output = 0        # 模型没给出可解析的题
         self.llm_errors = 0       # 模型调用失败（限流/额度耗尽/网络）
         self.last_error = ""
         self.requests = 0         # 命题请求次数（一次 make_item 算一次）
+
+    def _auditor_rejects_distractor(self, option: str, source_id: str) -> bool:
+        """Only certify a distractor with an explicit semantic rejection."""
+        try:
+            verdict = self.auditor.semantic_verdict(
+                Claim(text=option, source_id=source_id)
+            )
+        except Exception:  # noqa: BLE001 - verifier failure must fail closed
+            return False
+        return verdict in (VERDICT_UNSUPPORTED, VERDICT_CONTRADICTED)
 
     # ---- 一、读自述做分析 ----
 
@@ -336,7 +349,9 @@ class ExaminerAgent:
                         f"干扰项「{o}」的数值全部出现在切片中，可能同样成立")
             else:
                 r = overlap_ratio(o, body)
-                if r >= config.ITEM_DISTRACTOR_MAX and not _forbidden_by(o, body):
+                if (r >= config.ITEM_DISTRACTOR_MAX
+                        and not _forbidden_by(o, body)
+                        and not self._auditor_rejects_distractor(o, chunk.id)):
                     raise ItemRejected(
                         f"干扰项「{o[:18]}」的覆盖率 {r:.2f} 过高，可能同样成立")
 
