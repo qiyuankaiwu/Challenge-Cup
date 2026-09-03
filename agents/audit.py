@@ -171,8 +171,8 @@ class AuditAgent:
                         f"{chunk.id} 的 {ratio:.2f}，疑似引用错位", ratio)
         return VERDICT_SUPPORTED, f"证据覆盖率 {ratio:.2f}", ratio
 
-    def _llm_check(self, claim: Claim) -> str | None:
-        """真模型在场时的第二判据。Mock 后端返回空串，直接跳过。"""
+    def semantic_verdict(self, claim: Claim) -> str | None:
+        """返回真模型的独立语义判定；无有效结论时返回 ``None``。"""
         chunk = self.retriever.get(claim.source_id) if claim.source_id else None
         if chunk is None:
             return None
@@ -193,7 +193,8 @@ class AuditAgent:
         for claim in claims:
             verdict, note, ratio = self._rule_check(claim)
             claim.evidence_score = round(ratio, 3)
-            llm_verdict = self._llm_check(claim) if verdict == VERDICT_SUPPORTED else None
+            llm_verdict = (self.semantic_verdict(claim)
+                           if verdict == VERDICT_SUPPORTED else None)
             if llm_verdict and llm_verdict != VERDICT_SUPPORTED:
                 # 规则放行、模型拦下，取严的一方
                 verdict = llm_verdict
