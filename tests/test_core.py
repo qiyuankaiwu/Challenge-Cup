@@ -344,6 +344,10 @@ class TestIntake(unittest.TestCase):
 
     def test_duration_units_normalize_to_hours(self):
         self.assertEqual(self.f("实操大概40小时")["hands_on_hours"], 40)
+        self.assertEqual(self.f("实训课接触过两小时工业机器人")["hands_on_hours"], 2)
+        self.assertEqual(self.f("累计训练二十五小时")["hands_on_hours"], 25)
+        self.assertEqual(self.f("体验了半小时")["hands_on_hours"], 0.5)
+        self.assertEqual(self.f("练习了一个半小时")["hands_on_hours"], 1.5)
         self.assertEqual(self.f("上手了三个月")["hands_on_hours"], 480)
         self.assertEqual(self.f("练了两周")["hands_on_hours"], 80)
 

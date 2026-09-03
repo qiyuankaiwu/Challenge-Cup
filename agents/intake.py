@@ -23,6 +23,7 @@ import json
 import re
 
 from core.llm import parse_json
+from core.retrieval import cn_to_int
 
 _SYSTEM = (
     "你从学习者的自述里抽取结构化背景信息。只输出 JSON，字段："
@@ -56,17 +57,25 @@ _HOUR_PATTERNS = [
     (r"(\d+(?:\.\d+)?)\s*(?:个)?月(?!级)", 160.0),
     (r"(\d+(?:\.\d+)?)\s*年(?!级)", 1600.0),
 ]
-_CN_NUM = {"一": 1, "两": 2, "二": 2, "三": 3, "四": 4, "五": 5,
-           "六": 6, "七": 7, "八": 8, "九": 9, "十": 10, "半": 0.5}
+_CN_DURATION_NUM = r"[零〇一二两三四五六七八九十百千万亿]+"
 # 「二年级」「三年级」是学制，不是工龄。不排掉的话，一句
 # 「高职电气自动化二年级」会被算成两年实操、折合 3200 小时，
 # 先验直接顶到上界，测评开局就问偏。
 _NOT_DURATION = r"(?!级|段|检)"
 _CN_HOUR = [
-    (r"([一两二三四五六七八九十半])\s*年" + _NOT_DURATION, 1600.0),
-    (r"([一两二三四五六七八九十半])\s*(?:个)?月" + _NOT_DURATION, 160.0),
-    (r"([一两二三四五六七八九十半])\s*周" + _NOT_DURATION, 40.0),
-    (r"([一两二三四五六七八九十半])\s*天" + _NOT_DURATION, 8.0),
+    (rf"({_CN_DURATION_NUM})\s*年" + _NOT_DURATION, 1600.0),
+    (rf"({_CN_DURATION_NUM})\s*(?:个)?月" + _NOT_DURATION, 160.0),
+    (rf"({_CN_DURATION_NUM})\s*周" + _NOT_DURATION, 40.0),
+    (rf"({_CN_DURATION_NUM})\s*天" + _NOT_DURATION, 8.0),
+    (rf"({_CN_DURATION_NUM})\s*(?:个)?小时", 1.0),
+]
+# 半个单位单独处理；可同时覆盖「半小时」和「一个半小时」。
+_CN_HALF_HOUR = [
+    (rf"(?:({_CN_DURATION_NUM})\s*)?(?:个)?半\s*年" + _NOT_DURATION, 1600.0),
+    (rf"(?:({_CN_DURATION_NUM})\s*)?(?:个)?半\s*(?:个)?月" + _NOT_DURATION, 160.0),
+    (rf"(?:({_CN_DURATION_NUM})\s*)?(?:个)?半\s*周" + _NOT_DURATION, 40.0),
+    (rf"(?:({_CN_DURATION_NUM})\s*)?(?:个)?半\s*天" + _NOT_DURATION, 8.0),
+    (rf"(?:({_CN_DURATION_NUM})\s*)?(?:个)?半\s*(?:个)?小时", 1.0),
 ]
 
 # 明确表示"没碰过"的说法。这类要压到 0，不能因为提到了"机器人"就给学时。
@@ -101,14 +110,19 @@ def rule_extract(text: str) -> dict:
             hours = max(hours, float(m.group(1)) * mul)
     for pat, mul in _CN_HOUR:
         for m in re.finditer(pat, t):
-            hours = max(hours, _CN_NUM.get(m.group(1), 0) * mul)
+            hours = max(hours, (cn_to_int(m.group(1)) or 0) * mul)
+    for pat, mul in _CN_HALF_HOUR:
+        for m in re.finditer(pat, t):
+            base = cn_to_int(m.group(1)) if m.group(1) else 0
+            hours = max(hours, ((base or 0) + 0.5) * mul)
 
     if any(re.search(p, t) for p in _ZERO_HINTS):
         hours = 0.0
 
     # 上限保护：自述里说"干了二十年"折算出三万多小时，对先验没有额外意义，
     # 反而会把先验顶到上界。截断在一个饱和值上。
-    out["hands_on_hours"] = int(min(hours, 2000))
+    capped = min(float(hours), 2000.0)
+    out["hands_on_hours"] = int(capped) if capped.is_integer() else capped
 
     m = re.search(r"(?:想|希望|打算|目标是|准备)([^。；\n]{2,40})", t)
     if m:

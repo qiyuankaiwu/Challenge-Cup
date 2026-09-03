@@ -148,10 +148,10 @@ function createInteractiveDom() {
             });
         }
         if (id === 'quiz') {
-          feedbackQuestions = [...html.matchAll(/<div class="feedback-question" data-answer="([01])">([\s\S]*?)(?=<div class="feedback-question"|$)/g)]
+          feedbackQuestions = [...html.matchAll(/<div class="feedback-question" data-index="(\d+)">([\s\S]*?)(?=<div class="feedback-question"|$)/g)]
             .map(match => {
               const question = makeElement('');
-              question.dataset.answer = match[1];
+              question.dataset.index = match[1];
               question.textContent = textOnly(match[2]);
               const explain = {hidden: true};
               const answers = ['1', '0'].map(answerValue => {
@@ -299,16 +299,22 @@ test('submitFb refreshes the rendered resource count after feedback returns new 
   };
   appSandbox.document = {
     querySelector: selector => elements[selector],
-    querySelectorAll: selector => selector === '.feedback-question' ? [{dataset: {pick: '1', answer: '1'}}] : [],
+    querySelectorAll: selector => selector === '.feedback-question' ? [{dataset: {pick: '1'}}] : [],
     createElementNS: () => ({setAttribute() {}, textContent: '', appendChild() {}}),
   };
   const before = {session_id: 'S-1', events: [], resources: [], diagnosis: {mastery: [], gaps: []}, path: ['KP-01'], path_names: ['安全规程'], kp_index: {'KP-01': {name: '安全规程'}}};
-  const after = {...before, resources: [{kp: 'KP-01', kind: 'guide', title: '新增资料', difficulty: 2, claims: [], body: '内容'}], decision: {action: 'advance', reason: '已掌握'}};
+  const after = {...before, resources: [{kp: 'KP-01', kind: 'guide', title: '新增资料', difficulty: 2, claims: [], body: '内容'}], decision: {action: 'advance', reason: '已掌握'}, feedback_result: [{correct: true, answer: true, explain: '依据测试资料'}]};
   setSession(before);
-  appSandbox.fetch = async () => ({ok: true, json: async () => after});
+  let submitted;
+  appSandbox.fetch = async (_url, options) => {
+    submitted = JSON.parse(options.body);
+    return {ok: true, json: async () => after};
+  };
 
   await submitFb();
   assert.equal(elements['#rcount'].textContent, 1);
+  assert.deepEqual(submitted.choices, [true]);
+  assert.equal('answers' in submitted, false);
 });
 
 test('feedback append rebuilds the selector and continue keeps resources and quiz synchronized', async () => {
@@ -321,7 +327,7 @@ test('feedback append rebuilds the selector and continue keeps resources and qui
     path: ['KP-01'], path_names: ['安全规程'], kp_index: {'KP-01': {name: '安全规程'}},
     resources: [
       {kp: 'KP-01', kind: 'lecture', title: '基础讲解', difficulty: 2, claims: [], body: '讲解'},
-      {kp: 'KP-01', kind: 'quiz', title: '安全自测', difficulty: 2, claims: [], items: [{stem: '旧题', answer: true}]},
+      {kp: 'KP-01', kind: 'quiz', title: '安全自测', difficulty: 2, claims: [], items: [{stem: '旧题'}]},
     ],
   };
   const after = {
@@ -333,9 +339,10 @@ test('feedback append rebuilds the selector and continue keeps resources and qui
       {kp: 'KP-01', kind: 'lecture_simplified', title: '新增浅显讲解', difficulty: 1, claims: [], body: '补充'},
       {kp: 'KP-02', kind: 'lecture', title: '故障讲解', difficulty: 3, claims: [], body: '讲解'},
       {kp: 'KP-02', kind: 'case', title: '故障案例', difficulty: 3, claims: [], body: '案例'},
-      {kp: 'KP-02', kind: 'quiz', title: '故障自测', difficulty: 3, claims: [], items: [{stem: '新题', answer: false}]},
+      {kp: 'KP-02', kind: 'quiz', title: '故障自测', difficulty: 3, claims: [], items: [{stem: '新题'}]},
     ],
     decision: {action: 'advance', reason: '可以进入下一知识点'},
+    feedback_result: [{correct: true, answer: true, explain: '回答正确'}],
   };
 
   requiredApp('setSession')(before);
@@ -379,11 +386,11 @@ test('repeat and summary actions focus before scrolling to their destinations', 
   appSandbox.matchMedia = () => ({matches: false});
   requiredApp('setSession')({
     path: ['KP-01'], path_names: ['安全规程'], kb: {},
-    resources: [{kp: 'KP-01', kind: 'quiz', title: '安全自测', difficulty: 2, claims: [], items: [{stem: '题目', answer: true}]}],
+    resources: [{kp: 'KP-01', kind: 'quiz', title: '安全自测', difficulty: 2, claims: [], items: [{stem: '题目'}]}],
   });
   requiredApp('selectLearningUnit')('KP-01');
 
-  requiredApp('renderDecision')({action: 'consolidate', reason: '需要巩固'}, [true]);
+  requiredApp('renderDecision')({action: 'consolidate', reason: '需要巩固'}, [{correct: true, answer: true, explain: ''}]);
   dom.elements.continueLearning.onclick();
   assert.equal(dom.focusEvents.at(-1).id, 'learningContent');
   assert.equal(dom.focusEvents.at(-1).options.preventScroll, true);
@@ -393,7 +400,7 @@ test('repeat and summary actions focus before scrolling to their destinations', 
     {kind: 'scroll', id: 'learningContent'},
   ]);
 
-  requiredApp('renderDecision')({action: 'advance', reason: '已完成'}, [true]);
+  requiredApp('renderDecision')({action: 'advance', reason: '已完成'}, [{correct: true, answer: true, explain: ''}]);
   dom.elements.continueLearning.onclick();
   assert.equal(dom.focusEvents.at(-1).id, 'learningPlan');
   assert.equal(dom.focusEvents.at(-1).options.preventScroll, true);

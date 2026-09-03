@@ -227,6 +227,12 @@ def session_payload(sid: str) -> dict:
     data["state"] = orch.state
     data["kp_index"] = kp_index
     data["path_names"] = [kp_index[k]["name"] for k in session.path]
+    # 学习反馈会影响后续难度和资源生成，因此标准答案与解析不能随会话数据
+    # 提前下发。提交选择后，由 /api/feedback 在服务端判分并返回本轮解析。
+    for resource in data.get("resources", []):
+        if resource.get("kind") == "quiz":
+            resource["items"] = [public_feedback_item(item)
+                                 for item in resource.get("items", [])]
     # 资源展示必须把来源、核实状态和人工备注一并带到前端。只给 source_id
     # 会让评委看不到“这条断言的依据是否已核实”，也无法核对具体来源。
     publicly_verified = publicly_verified_source_ids()
@@ -242,6 +248,64 @@ def session_payload(sid: str) -> dict:
     }
     validate_demo_source_manifest(data["kb"], artifact="在线会话")
     return data
+
+
+_PUBLIC_FEEDBACK_ITEM_FIELDS = ("stem", "type", "difficulty", "source_id")
+
+
+def public_feedback_item(item: dict) -> dict:
+    """公开反馈题题面，不公开会影响服务端判分的字段。"""
+    return {key: item[key] for key in _PUBLIC_FEEDBACK_ITEM_FIELDS if key in item}
+
+
+def score_feedback_choices(session, kp: str, choices: object
+                           ) -> tuple[list[bool], list[dict]]:
+    """用会话内标准答案判分，并返回提交后才可公开的逐题结果。"""
+    if not isinstance(kp, str) or not kp:
+        raise ValueError("缺少要反馈的知识点")
+    if not isinstance(choices, list) or not choices:
+        raise ValueError("请提交本轮每道题的选择")
+    if any(type(choice) is not bool for choice in choices):
+        raise ValueError("每道题的选择必须是真正的布尔值")
+
+    resource = next((item for item in session.resources
+                     if item.kp == kp and item.kind == "quiz"), None)
+    items = resource.items[:4] if resource is not None else []
+    if not items:
+        raise ValueError("该知识点没有可用于反馈的测试题")
+    if len(choices) != len(items):
+        raise ValueError(f"本轮应提交 {len(items)} 道题的选择")
+
+    correctness = []
+    results = []
+    for index, (item, choice) in enumerate(zip(items, choices), 1):
+        answer = item.get("answer")
+        if type(answer) is not bool:
+            raise ValueError(f"第 {index} 题缺少有效的标准答案")
+        correct = choice is answer
+        correctness.append(correct)
+        results.append({
+            "index": index,
+            "stem": item.get("stem", ""),
+            "choice": choice,
+            "answer": answer,
+            "correct": correct,
+            "explain": item.get("explain", ""),
+        })
+    return correctness, results
+
+
+_PUBLIC_INTERVIEW_ITEM_FIELDS = (
+    "id", "kp", "level", "stem", "options", "level_source", "source_id",
+    "origin", "_reason", "_kp_name",
+)
+
+
+def public_interview_item(item: dict | None) -> dict | None:
+    """只公开作答所需题目字段；答案始终留在服务端评分。"""
+    if item is None:
+        return None
+    return {key: item[key] for key in _PUBLIC_INTERVIEW_ITEM_FIELDS if key in item}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -337,7 +401,8 @@ class Handler(BaseHTTPRequestHandler):
             INTERVIEWS[sid] = iv
             item = iv.next_item()
             return self._json({"interview_id": sid, "prior": round(iv.prior, 3),
-                               "item": item, "snapshot": iv.snapshot()})
+                               "item": public_interview_item(item),
+                               "snapshot": iv.snapshot()})
 
         if self.path == "/api/interview/answer":
             iid = body.get("interview_id")
@@ -349,7 +414,8 @@ class Handler(BaseHTTPRequestHandler):
             except (KeyError, ValueError) as exc:
                 return self._json({"error": f"作答无效：{exc}"}, 400)
             nxt = iv.next_item()
-            return self._json({"step": step, "item": nxt,
+            return self._json({"step": step,
+                               "item": public_interview_item(nxt),
                                "snapshot": iv.snapshot()})
 
         if self.path == "/api/interview/finish":
@@ -376,13 +442,15 @@ class Handler(BaseHTTPRequestHandler):
             if sid not in SESSIONS:
                 return self._json({"error": "会话不存在或服务已重启"}, 404)
             orch, session = SESSIONS[sid]
-            answers = [bool(a) for a in body.get("answers", [])]
             try:
+                answers, feedback_result = score_feedback_choices(
+                    session, body.get("kp"), body.get("choices"))
                 decision = orch.feedback(session, body["kp"], answers)
             except Exception as exc:                      # noqa: BLE001
                 return self._json({"error": str(exc)}, 400)
             payload = session_payload(sid)
             payload["decision"] = decision
+            payload["feedback_result"] = feedback_result
             return self._json(payload)
 
         return self._json({"error": "无此接口"}, 404)
